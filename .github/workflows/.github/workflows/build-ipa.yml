@@ -1,0 +1,42 @@
+name: Build IPA (GitHub-hosted Mac)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install JDK 8 (needed to compile the Java launcher app)
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '8'
+
+      - name: Install build tools
+        run: brew install ldid cmake make
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+          "$JAVA_HOME/bin/javac" -version
+          gmake --version | head -1
+
+      - name: Build IPA
+        run: |
+          export PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/make/libexec/gnubin:$PATH"
+          gmake -j"$(sysctl -n hw.ncpu)" dsym package PLATFORM=2 BOOTJDK="$JAVA_HOME/bin"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: amethyst-ipa
+          path: artifacts/*.ipa
+          if-no-files-found: error
