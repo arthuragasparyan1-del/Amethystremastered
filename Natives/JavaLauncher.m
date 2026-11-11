@@ -1,3 +1,4 @@
+
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
@@ -8,6 +9,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <mach/mach.h>
 
 #include "utils.h"
 
@@ -23,33 +25,18 @@
 extern char **environ;
 
 BOOL validateVirtualMemorySpace(size_t size) {
-    size <<= 20; // convert to MB
+    size <<= 20;
     void *map = mmap(0, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    // check if process successfully maps and unmaps a contiguous range
     if(map == MAP_FAILED || munmap(map, size) != 0)
         return NO;
     return YES;
 }
 
 void init_loadDefaultEnv() {
-    /* Define default env */
-
-    // Silent Caciocavallo NPE error in locating Android-only lib
     setenv("LD_LIBRARY_PATH", "", 1);
-
-    // Ignore mipmap for performance(?) seems does not affect iOS
-    //setenv("LIBGL_MIPMAP", "3", 1);
-
-    // Disable overloaded functions hack for Minecraft 1.17+
     setenv("LIBGL_NOINTOVLHACK", "1", 1);
-
-    // Fix white color on banner and sheep, since GL4ES 1.1.5
     setenv("LIBGL_NORMALIZE", "1", 1);
-
-    // Override OpenGL version to 4.1 for Zink
     setenv("MESA_GL_VERSION_OVERRIDE", "4.1", 1);
-
-    // Runs JVM in a separate thread
     setenv("HACK_IGNORE_START_ON_FIRST_THREAD", "1", 1);
 }
 
@@ -73,7 +60,6 @@ void init_loadCustomEnv() {
 void init_loadCustomJvmFlags(int* argc, const char** argv) {
     NSString *jvmargs = [PLProfiles resolveKeyForCurrentProfile:@"javaArgs"];
     if (jvmargs == nil) return;
-    // Make the separator happy
     jvmargs = [jvmargs stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
     jvmargs = [@" " stringByAppendingString:jvmargs];
 
@@ -94,15 +80,10 @@ void init_loadCustomJvmFlags(int* argc, const char** argv) {
 
         ++*argc;
         argv[*argc] = [@"-" stringByAppendingString:jvmarg].UTF8String;
-
         NSLog(@"[JavaLauncher] Added custom JVM flag: %s", argv[*argc]);
     }
 }
 
-// Minecraft 26.3 and newer moved from GLFW to SDL3 and require LWJGL 3.4.x (org.lwjgl.sdl) on Java 25.
-// Older versions keep the existing GLFW bridge and bundled LWJGL 3.3.x path.
-// The id is scanned for any "<major>.<minor>" pair so decorated ids such as "26.3-snapshot-9",
-// "26.4-pre-1", "26.3-rc-1" or "fabric-loader-0.19.5-26.3" classify correctly.
 static BOOL versionRequiresSDL(NSString *versionId) {
     if (versionId.length == 0) return NO;
     NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:@"(?<![0-9.])([0-9]+)\\.([0-9]+)(?![0-9])" options:0 error:nil];
@@ -110,8 +91,6 @@ static BOOL versionRequiresSDL(NSString *versionId) {
     [re enumerateMatchesInString:versionId options:0 range:NSMakeRange(0, versionId.length) usingBlock:^(NSTextCheckingResult *m, NSMatchingFlags f, BOOL *stop) {
         int major = [versionId substringWithRange:[m rangeAtIndex:1]].intValue;
         int minor = [versionId substringWithRange:[m rangeAtIndex:2]].intValue;
-        // Only the first token that looks like a Minecraft version decides ("1.x" or "26.x" and up).
-        // This skips loader versions such as Fabric's "0.19" and Forge's "49.0".
         if (major == 1 || major >= 26) {
             requiresSDL = (major > 26 || (major == 26 && minor >= 3));
             *stop = YES;
@@ -126,7 +105,7 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
     init_loadDefaultEnv();
     init_loadCustomEnv();
 
-    DeviceGetJITFlags(YES); // refresh JIT flags right after loading env
+    DeviceGetJITFlags(YES);
     BOOL requiresTXMWorkaround = DeviceHasJITFlags(JIT_FLAG_FORCE_MIRRORED | JIT_FLAG_HAS_TXM);
     BOOL jit26AlwaysAttached = getPrefBool(@"debug.debug_always_attached_jit");
     if (requiresTXMWorkaround) {
@@ -134,12 +113,10 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
         if(!result) result = JIT26CreateRegionLegacy(getpagesize());
         if ((uint32_t)result != 0x690000E0) {
             munmap(result, getpagesize());
-            // we can't continue since legacy script only allows calling breakpoint once
             NSString *inBundleScriptPath = [NSBundle.mainBundle pathForResource:@"UniversalJIT26" ofType:@"js"];
             NSString *lcAppInfoPath = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"LCAppInfo.plist"];
             NSMutableDictionary *lcAppInfo = [NSMutableDictionary dictionaryWithContentsOfFile:lcAppInfoPath];
             if(lcAppInfo) {
-                // if this is inside LiveContainer, we assign script ourselves and prompt user to restart Amethyst
                 lcAppInfo[@"jitLaunchScriptJs"] = [[NSData dataWithContentsOfFile:inBundleScriptPath] base64EncodedStringWithOptions:0];
                 if([lcAppInfo writeToFile:lcAppInfoPath atomically:YES]) {
                     showDialog(localize(@"Error", nil), @"Amethyst was launched with a legacy script. We have updated the script to Universal, please restart LiveContainer to continue.");
@@ -154,16 +131,13 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
         }
         JIT26SendJITScript([NSString stringWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"UniversalJIT26Extension" ofType:@"js"]]);
         JIT26SetDetachAfterFirstBr(!jit26AlwaysAttached);
-        // make sure we don't get stuck in EXC_BAD_ACCESS
         task_set_exception_ports(mach_task_self(), EXC_MASK_BAD_ACCESS, 0, EXCEPTION_DEFAULT, MACHINE_THREAD_STATE);
     }
     if (!requiresTXMWorkaround || jit26AlwaysAttached) {
         if (jit26AlwaysAttached) {
-            // Only allow StikDebug to catch our breakpoints to prevent any stutters
             task_set_exception_ports(mach_task_self(), EXC_MASK_ALL & ~EXC_MASK_BREAKPOINT, 0,
                 EXCEPTION_DEFAULT, THREAD_STATE_NONE);
         }
-        // Activate Library Validation bypass for external runtime and dylibs (JNA, etc)
         init_bypassDyldLibValidation();
     } else {
         NSLog(@"[DyldLVBypass] Hook disabled! Loading unsigned dylib will cause code signature error.");
@@ -174,7 +148,6 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
     NSString *defaultJRETag;
     NSCAssert(launchTarget, @"Unexpected nil launchTarget");
     if ([launchTarget isKindOfClass:NSDictionary.class]) {
-        // Get preferred Java version from current profile
         int preferredJavaVersion = [PLProfiles resolveKeyForCurrentProfile:@"javaVersion"].intValue;
         if (preferredJavaVersion > 0) {
             if (minVersion > preferredJavaVersion) {
@@ -184,7 +157,7 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
                 minVersion = preferredJavaVersion;
             }
         }
-        // Pick the runtime stack per game version: 26.3+ needs Java 25 and the SDL3/LWJGL 3.4.x stack
+
         NSString *versionId = PLProfiles.current.selectedProfile[@"lastVersionId"];
         if (versionRequiresSDL(versionId)) {
             if (minVersion < 25) {
@@ -192,7 +165,6 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
             }
             NSString *sdlRuntime = [NSString stringWithFormat:@"%@/libs/lwjgl-sdl/lwjgl.jar", NSBundle.mainBundle.bundlePath];
             if (![fm fileExistsAtPath:sdlRuntime]) {
-                // Fail early with a clear message instead of NoClassDefFoundError: org/lwjgl/sdl/SDLPlatform
                 NSLog(@"[JavaLauncher] %@ requires the SDL3/LWJGL 3.4.x runtime, which is not bundled in this build", versionId);
                 UIKit_returnToSplitView();
                 showDialog(localize(@"Error", nil), [NSString stringWithFormat:@"Minecraft %@ needs the SDL3 + LWJGL 3.4.3 runtime, which this build of Amethyst does not include yet.", versionId]);
@@ -205,11 +177,9 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
             defaultJRETag = @"1_17_newer";
         }
 
-        // Setup RENDERER
         NSString *renderer = [PLProfiles resolveKeyForCurrentProfile:@"renderer"];
         NSLog(@"[JavaLauncher] RENDERER is set to %@\n", renderer);
         setenv("RENDERER", renderer.UTF8String, 1);
-        // Setup gameDir
         gameDir = [NSString stringWithFormat:@"%s/instances/%@/%@",
             getenv("AME_HOME"), getPrefObject(@"general.game_directory"),
             [PLProfiles resolveKeyForCurrentProfile:@"gameDir"]]
@@ -219,6 +189,7 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
         gameDir = @(getenv("GAME_DIR"));
         launchJar = YES;
     }
+
     NSLog(@"[JavaLauncher] Looking for Java %d or later", minVersion);
     NSString *javaHome = getSelectedJavaHome(defaultJRETag, minVersion);
 
@@ -229,7 +200,6 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
             isExecuteJar ? [launchTarget lastPathComponent] : PLProfiles.current.selectedProfile[@"lastVersionId"], minVersion]);
         return 1;
     } else if ([javaHome hasPrefix:@(getenv("AME_HOME"))]) {
-        // Copy libawt_xawt.dylib
         NSString *dest = [NSString stringWithFormat:@"%@/lib/libawt_xawt.dylib", javaHome];
         NSString *source = [NSString stringWithFormat:@"%@/Frameworks/libawt_xawt.dylib", NSBundle.mainBundle.bundlePath];
         NSError *error;
@@ -261,9 +231,8 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
         return 1;
     }
 
-    // Setup options.txt
     [MinecraftOptionUtils setupOptionsAtGameDir:gameDir];
-    
+
     int margc = -1;
     const char *margv[1000];
 
@@ -281,14 +250,11 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
     margv[++margc] = [NSString stringWithFormat:@"-DUIScreen.maximumFramesPerSecond=%d", (int)UIScreen.mainScreen.maximumFramesPerSecond].UTF8String;
     margv[++margc] = "-Dorg.lwjgl.glfw.checkThread0=false";
     margv[++margc] = "-Dorg.lwjgl.system.allocator=system";
-    //margv[++margc] = "-Dorg.lwjgl.util.NoChecks=true";
     margv[++margc] = "-Dlog4j2.formatMsgNoLookups=true";
 
-    // Preset OpenGL libname
     const char *glLibName = getenv("RENDERER");
     if (glLibName) {
         if (!strcmp(glLibName, "auto")) {
-            // workaround only applies to 1.20.2+
             glLibName = RENDERER_NAME_MTL_ANGLE;
         }
         margv[++margc] = [NSString stringWithFormat:@"-Dorg.lwjgl.opengl.libname=%s", glLibName].UTF8String;
@@ -300,21 +266,17 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
         margv[++margc] = [NSString stringWithFormat:@"-javaagent:%@/arc_dns_injector.jar=23.95.137.176", librariesPath].UTF8String;
     }
 
-    // Workaround random stack guard allocation crashes
     margv[++margc] = "-XX:+UnlockExperimentalVMOptions";
     margv[++margc] = "-XX:+DisablePrimordialThreadGuardPages";
 
-    // On iOS 26, use mirror mapped JIT by default
     if (@available(iOS 26.0, *)) {
         margv[++margc] = "-XX:+MirrorMappedCodeCache";
     }
 
-    // Disable Forge 1.16.x early progress window
     margv[++margc] = "-Dfml.earlyprogresswindow=false";
 
-    // Load java
-    NSString *libjlipath8 = [NSString stringWithFormat:@"%@/lib/jli/libjli.dylib", javaHome]; // java 8
-    NSString *libjlipath11 = [NSString stringWithFormat:@"%@/lib/libjli.dylib", javaHome]; // java 11+
+    NSString *libjlipath8 = [NSString stringWithFormat:@"%@/lib/jli/libjli.dylib", javaHome];
+    NSString *libjlipath11 = [NSString stringWithFormat:@"%@/lib/libjli.dylib", javaHome];
     BOOL isJava8 = [fm fileExistsAtPath:libjlipath8];
     setenv("INTERNAL_JLI_PATH", (isJava8 ? libjlipath8 : libjlipath11).UTF8String, 1);
     void* libjli = dlopen(getenv("INTERNAL_JLI_PATH"), RTLD_GLOBAL);
@@ -327,25 +289,18 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
         return 1;
     }
 
-    // Setup Caciocavallo
     margv[++margc] = "-Djava.awt.headless=false";
     margv[++margc] = "-Dcacio.font.fontmanager=sun.awt.X11FontManager";
     margv[++margc] = "-Dcacio.font.fontscaler=sun.font.FreetypeFontScaler";
     margv[++margc] = [NSString stringWithFormat:@"-Dcacio.managed.screensize=%dx%d", width, height].UTF8String;
     margv[++margc] = "-Dswing.defaultlaf=javax.swing.plaf.metal.MetalLookAndFeel";
     if (isJava8) {
-        // Setup Caciocavallo
         margv[++margc] = "-Dawt.toolkit=net.java.openjdk.cacio.ctc.CTCToolkit";
         margv[++margc] = "-Djava.awt.graphicsenv=net.java.openjdk.cacio.ctc.CTCGraphicsEnvironment";
     } else {
-        // Required by Cosmetica to inject DNS
         margv[++margc] = "--add-opens=java.base/java.net=ALL-UNNAMED";
-
-        // Setup Caciocavallo
         margv[++margc] = "-Dawt.toolkit=com.github.caciocavallosilano.cacio.ctc.CTCToolkit";
         margv[++margc] = "-Djava.awt.graphicsenv=com.github.caciocavallosilano.cacio.ctc.CTCGraphicsEnvironment";
-
-        // Required by Caciocavallo17 to access internal API
         margv[++margc] = "--add-exports=java.desktop/java.awt=ALL-UNNAMED";
         margv[++margc] = "--add-exports=java.desktop/java.awt.peer=ALL-UNNAMED";
         margv[++margc] = "--add-exports=java.desktop/sun.awt.image=ALL-UNNAMED";
@@ -361,12 +316,9 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
         margv[++margc] = "--add-opens=java.desktop/sun.font=ALL-UNNAMED";
         margv[++margc] = "--add-opens=java.desktop/sun.java2d=ALL-UNNAMED";
         margv[++margc] = "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED";
-
-        // TODO: workaround, will be removed once the startup part works without PLaunchApp
         margv[++margc] = "--add-exports=cpw.mods.bootstraplauncher/cpw.mods.bootstraplauncher=ALL-UNNAMED";
     }
 
-    // Add Caciocavallo bootclasspath
     NSString *cacio_classpath = [NSString stringWithFormat:@"-Xbootclasspath/%s", isJava8 ? "p" : "a"];
     NSString *cacio_libs_path = [NSString stringWithFormat:@"%@/libs_caciocavallo%s", NSBundle.mainBundle.bundlePath, isJava8 ? "" : "17"];
     NSArray *files = [fm contentsOfDirectoryAtPath:cacio_libs_path error:nil];
@@ -377,11 +329,7 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
     }
     margv[++margc] = cacio_classpath.UTF8String;
 
-    // FIXME: the JVM arg is deprecated; and it is currently broken for Java 25
     if (!getenv("JVM_KEEP_UseCompressedClassPointers") || !getEntitlementValue(@"com.apple.developer.kernel.extended-virtual-addressing")) {
-        // In jailed environment, where extended virtual addressing entitlement isn't
-        // present (for free dev account), allocating compressed space fails.
-        // FIXME: does extended VA allow allocating compressed class space?
         margv[++margc] = "-XX:-UseCompressedClassPointers";
     }
 
@@ -413,7 +361,6 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
     } else {
         margv[++margc] = [launchTarget UTF8String];
     }
-    //margv[++margc] = "ghidra.GhidraRun";
 
     pJLI_Launch = (JLI_Launch_func *)dlsym(libjli, "JLI_Launch");
 
@@ -424,25 +371,20 @@ int launchJVM(NSString *username, id launchTarget, int width, int height, int mi
 
     NSLog(@"[Init] Calling JLI_Launch");
 
-    // Cr4shed known issue: exit after crash dump,
-    // reset signal handler so that JVM can catch them
     signal(SIGSEGV, SIG_DFL);
     signal(SIGPIPE, SIG_DFL);
     signal(SIGBUS, SIG_DFL);
     signal(SIGILL, SIG_DFL);
     signal(SIGFPE, SIG_DFL);
 
-    // Free split VC
     tmpRootVC = nil;
 
     return pJLI_Launch(++margc, margv,
-                   0, NULL, // sizeof(const_jargs) / sizeof(char *), const_jargs,
-                   0, NULL, // sizeof(const_appclasspath) / sizeof(char *), const_appclasspath,
-                   // These values are ignored in Java 17, so keep it anyways
+                   0, NULL,
+                   0, NULL,
                    "1.8.0-internal",
                    "1.8",
-
                    "java", "openjdk",
-                   /* (const_jargs != NULL) ? JNI_TRUE : */ JNI_FALSE,
+                   JNI_FALSE,
                    JNI_TRUE, JNI_FALSE, JNI_TRUE);
 }
