@@ -26,18 +26,28 @@ jobs:
           sudo ln -sf "$(brew --prefix make)/bin/gmake" /usr/local/bin/gmake
           gmake --version
 
+      - name: Install CMake
+        run: |
+          brew install cmake
+          cmake --version
+
       - name: Install JDK 8
         uses: actions/setup-java@v5
         with:
           distribution: zulu
           java-version: '8'
 
-      - name: Verify Java
+      - name: Verify JDK 8
         run: |
-          java -version
-          javac -version
           echo "JAVA_HOME=$JAVA_HOME"
+          "$JAVA_HOME/bin/java" -version
+          "$JAVA_HOME/bin/javac" -version
           test -x "$JAVA_HOME/bin/javac"
+
+      - name: Install ldid
+        run: |
+          brew install ldid
+          ldid -h || true
 
       - name: Verify Xcode
         run: |
@@ -46,11 +56,10 @@ jobs:
 
       - name: Build Amethyst
         run: |
-          export BOOTJDK="$JAVA_HOME"
-
           set -o pipefail
 
           xcodebuild clean build \
             -project Amethyst.xcodeproj \
             -scheme "Angel Aura Amethyst" \
-            -configuration Release
+            -configuration Release \
+            "BOOTJDK=$JAVA_HOME/bin"
