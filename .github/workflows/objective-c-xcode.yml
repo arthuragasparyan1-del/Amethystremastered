@@ -24,6 +24,18 @@ jobs:
           sudo ln -sf "$(brew --prefix make)/bin/gmake" /usr/local/bin/gmake
           gmake --version
 
+      - name: Install JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      - name: Verify Java
+        run: |
+          java -version
+          echo "JAVA_HOME=$JAVA_HOME"
+          test -x "$JAVA_HOME/bin/javac"
+
       - name: Verify Xcode
         run: |
           xcodebuild -version
@@ -31,6 +43,8 @@ jobs:
 
       - name: Build Amethyst
         run: |
+          export BOOTJDK="$JAVA_HOME"
+
           set -o pipefail
 
           xcodebuild clean build \
