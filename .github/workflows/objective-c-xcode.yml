@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install GNU Make
         run: |
@@ -25,14 +27,15 @@ jobs:
           gmake --version
 
       - name: Install JDK 8
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
-          distribution: temurin
+          distribution: zulu
           java-version: '8'
 
       - name: Verify Java
         run: |
           java -version
+          javac -version
           echo "JAVA_HOME=$JAVA_HOME"
           test -x "$JAVA_HOME/bin/javac"
 
