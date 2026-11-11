@@ -1,3 +1,4 @@
+
 #import "KeyboardInput.h"
 #import "../utils.h"
 
@@ -5,16 +6,19 @@
 
 @implementation KeyboardInput
 
-int keycodeTable[UIKeyboardHIDUsageKeyboardRightGUI+1];
+int keycodeTable[UIKeyboardHIDUsageKeyboardRightGUI + 1];
 
 + (void)initKeycodeTable {
-    for (int i = UIKeyboardHIDUsageKeyboardA; i <= UIKeyboardHIDUsageKeyboardZ; i++) {
+    for (int i = UIKeyboardHIDUsageKeyboardA;
+         i <= UIKeyboardHIDUsageKeyboardZ; i++) {
         keycodeTable[i] = i - UIKeyboardHIDUsageKeyboardA + GLFW_KEY_A;
     }
 
-    // 0-9 keys
+    // Number keys
     keycodeTable[UIKeyboardHIDUsageKeyboard0] = GLFW_KEY_0;
-    for (int i = UIKeyboardHIDUsageKeyboard1; i <= UIKeyboardHIDUsageKeyboard9; i++) {
+
+    for (int i = UIKeyboardHIDUsageKeyboard1;
+         i <= UIKeyboardHIDUsageKeyboard9; i++) {
         keycodeTable[i] = i - UIKeyboardHIDUsageKeyboard1 + GLFW_KEY_1;
     }
 
@@ -51,7 +55,7 @@ int keycodeTable[UIKeyboardHIDUsageKeyboardRightGUI+1];
     keycodeTable[UIKeyboardHIDUsageKeyboardPageUp] = GLFW_KEY_PAGE_UP;
     keycodeTable[UIKeyboardHIDUsageKeyboardPageDown] = GLFW_KEY_PAGE_DOWN;
 
-    // Some other keys
+    // Other keys
     keycodeTable[UIKeyboardHIDUsageKeyboardHome] = GLFW_KEY_HOME;
     keycodeTable[UIKeyboardHIDUsageKeyboardEscape] = GLFW_KEY_ESCAPE;
     keycodeTable[UIKeyboardHIDUsageKeyboardTab] = GLFW_KEY_TAB;
@@ -78,45 +82,73 @@ int keycodeTable[UIKeyboardHIDUsageKeyboardRightGUI+1];
     keycodeTable[UIKeyboardHIDUsageKeypadEnter] = GLFW_KEY_NUMPAD_ENTER;
     keycodeTable[UIKeyboardHIDUsageKeypadEqualSign] = GLFW_KEY_NUMPAD_EQUAL;
     keycodeTable[UIKeyboardHIDUsageKeypad0] = GLFW_KEY_NUMPAD_0;
-    for (int i = UIKeyboardHIDUsageKeypad1; i <= UIKeyboardHIDUsageKeypad9; i++) {
+
+    for (int i = UIKeyboardHIDUsageKeypad1;
+         i <= UIKeyboardHIDUsageKeypad9; i++) {
         keycodeTable[i] = i - UIKeyboardHIDUsageKeypad1 + GLFW_KEY_NUMPAD_1;
     }
 
     // Function keys
-    for (int i = UIKeyboardHIDUsageKeyboardF1; i <= UIKeyboardHIDUsageKeyboardF12; i++) {
+    for (int i = UIKeyboardHIDUsageKeyboardF1;
+         i <= UIKeyboardHIDUsageKeyboardF12; i++) {
         keycodeTable[i] = i - UIKeyboardHIDUsageKeyboardF1 + GLFW_KEY_F1;
     }
 }
 
 + (BOOL)sendKeyEvent:(UIKey *)key down:(BOOL)isDown {
+    if (key == nil) {
+        return NO;
+    }
+
     char modifiers = 0;
 
-    // convert UIKey's modifiers to GLFW
+    // Convert UIKit modifiers to GLFW modifiers
     if (key.modifierFlags & UIKeyModifierAlphaShift) {
         modifiers |= GLFW_MOD_CAPS_LOCK;
     }
+
     if (key.modifierFlags & UIKeyModifierShift) {
         modifiers |= GLFW_MOD_SHIFT;
     }
+
     if (key.modifierFlags & UIKeyModifierAlternate) {
         modifiers |= GLFW_MOD_ALT;
     }
+
     if (key.modifierFlags & UIKeyModifierControl) {
         modifiers |= GLFW_MOD_CONTROL;
     }
 
-    // send the keycode
-    int keycode = keycodeTable[key.keyCode];
-    if (keycode != 0) {
-        CallbackBridge_nativeSendKey(keycode, 0 /* scancode */, isDown, modifiers);
-    } else {
-        NSLog(@"KeyboardInput: Unhandled key %lu", (unsigned long)key.keyCode);
+    // Validate the hardware key code before accessing the table
+    NSUInteger hardwareCode = key.keyCode;
+
+    if (hardwareCode >=
+        sizeof(keycodeTable) / sizeof(keycodeTable[0])) {
+        NSLog(@"KeyboardInput: Invalid key code %lu",
+              (unsigned long)hardwareCode);
+        return NO;
     }
 
-    // key.characters.length < 11: skip sending characters if the string starts with UIKeyInput
+    int keycode = keycodeTable[hardwareCode];
+
+    // Send key press or release to GLFW
+    if (keycode != 0) {
+        CallbackBridge_nativeSendKey(
+            keycode,
+            0,
+            isDown ? 1 : 0,
+            modifiers
+        );
+    } else {
+        NSLog(@"KeyboardInput: Unhandled key %lu",
+              (unsigned long)hardwareCode);
+    }
+
+    // Send typed characters
     if (isDown && key.characters.length < 11) {
-        for (int i = 0; i < key.characters.length; i++) {
+        for (NSUInteger i = 0; i < key.characters.length; i++) {
             int keychar = [key.characters characterAtIndex:i];
+
             CallbackBridge_nativeSendCharMods(keychar, modifiers);
             CallbackBridge_nativeSendChar(keychar);
         }
