@@ -1,18 +1,24 @@
 
-// Left and right Shift are tracked independently using atomic state.
-// This allows keyboard and mouse callbacks on different threads
-// to read and update the Shift state safely.
+#include "utils.h"
+#include "glfw_keycodes.h"
+
+#include <stdatomic.h>
+#include <stdbool.h>
+
+// Track left and right Shift independently.
+// Atomic state allows keyboard and mouse callbacks on different threads
+// to read and update Shift state safely.
 
 static atomic_bool leftShiftDown = ATOMIC_VAR_INIT(false);
 static atomic_bool rightShiftDown = ATOMIC_VAR_INIT(false);
 
 static inline char currentShiftModifier(void) {
-    BOOL left = atomic_load_explicit(
+    bool left = atomic_load_explicit(
         &leftShiftDown,
         memory_order_acquire
     );
 
-    BOOL right = atomic_load_explicit(
+    bool right = atomic_load_explicit(
         &rightShiftDown,
         memory_order_acquire
     );
@@ -21,7 +27,7 @@ static inline char currentShiftModifier(void) {
 }
 
 static void updateShiftState(int key, int action) {
-    BOOL down = action != 0;
+    bool down = (action != 0);
 
     if (key == GLFW_KEY_LEFT_SHIFT) {
         atomic_store_explicit(
@@ -39,16 +45,18 @@ static void updateShiftState(int key, int action) {
 }
 
 char getKeyModifiers(int key, int action) {
-    static char currMods;
+    static char currMods = 0;
 
     char mod;
 
     switch (key) {
         case GLFW_KEY_LEFT_CONTROL:
+        case GLFW_KEY_RIGHT_CONTROL:
             mod = GLFW_MOD_CONTROL;
             break;
 
         case GLFW_KEY_LEFT_ALT:
+        case GLFW_KEY_RIGHT_ALT:
             mod = GLFW_MOD_ALT;
             break;
 
@@ -65,7 +73,7 @@ char getKeyModifiers(int key, int action) {
                 | currentShiftModifier();
     }
 
-    if (action) {
+    if (action != 0) {
         currMods |= mod;
     } else {
         currMods &= ~mod;
@@ -86,7 +94,7 @@ void CallbackBridge_nativeSendKey(
     char tracked = getKeyModifiers(key, action);
 
     if (GLFW_invoke_Key && isInputReady) {
-        keyDownBuffer[MAX(0, key - 31)] = (jbyte)action;
+        keyDownBuffer[MAX(0, key - 31)] = (jbyte) action;
 
         if (mods == 0) {
             mods = tracked;
@@ -94,11 +102,13 @@ void CallbackBridge_nativeSendKey(
             mods |= currentShiftModifier();
         }
 
+        // Remove Shift from the release event only when neither
+        // Shift key is still being held.
         if (
             (key == GLFW_KEY_LEFT_SHIFT ||
              key == GLFW_KEY_RIGHT_SHIFT) &&
             action == 0 &&
-            !currentShiftModifier()
+            currentShiftModifier() == 0
         ) {
             mods &= ~GLFW_MOD_SHIFT;
         }
@@ -113,7 +123,7 @@ void CallbackBridge_nativeSendKey(
             );
         } else {
             GLFW_invoke_Key(
-                (void*)showingWindow,
+                (void *) showingWindow,
                 key,
                 scancode,
                 action,
@@ -156,7 +166,7 @@ void CallbackBridge_nativeSendMouseButton(
         mods = getKeyModifiers(0, action);
     }
 
-    // Preserve Shift when a mouse click occurs while Shift is held.
+    // Preserve Shift when clicking while Shift is held.
     mods |= currentShiftModifier();
 
     if (isUseStackQueueCall) {
@@ -169,7 +179,7 @@ void CallbackBridge_nativeSendMouseButton(
         );
     } else {
         GLFW_invoke_MouseButton(
-            (void*)showingWindow,
+            (void *) showingWindow,
             button,
             action,
             mods
