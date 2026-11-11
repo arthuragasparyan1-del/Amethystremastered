@@ -10,8 +10,8 @@ on:
 
 jobs:
   build:
-    name: Build Amethyst
-    runs-on: macos-latest
+    name: Build Amethyst and IPA
+    runs-on: macos-15
 
     steps:
       - name: Checkout
@@ -22,8 +22,7 @@ jobs:
       - name: Install GNU Make
         run: |
           brew install make
-          sudo mkdir -p /usr/local/bin
-          sudo ln -sf "$(brew --prefix make)/bin/gmake" /usr/local/bin/gmake
+          echo "$(brew --prefix make)/bin" >> "$GITHUB_PATH"
           gmake --version
 
       - name: Install CMake
@@ -35,7 +34,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: zulu
-          java-version: '8'
+          java-version: "8"
 
       - name: Verify JDK 8
         run: |
@@ -49,17 +48,48 @@ jobs:
           brew install ldid
           ldid -h || true
 
+      - name: Install build dependencies
+        run: |
+          brew install cmake
+
       - name: Verify Xcode
         run: |
           xcodebuild -version
           xcodebuild -list -project Amethyst.xcodeproj
 
-      - name: Build Amethyst
+      - name: Build Amethyst with Xcode
         run: |
           set -o pipefail
-
           xcodebuild clean build \
             -project Amethyst.xcodeproj \
             -scheme "Angel Aura Amethyst" \
             -configuration Release \
             "BOOTJDK=$JAVA_HOME/bin"
+
+      - name: Build iOS IPA
+        run: |
+          set -e
+          gmake dsym package \
+            PLATFORM=2 \
+            BOOTJDK="$JAVA_HOME/bin" \
+            RUNNER=1
+
+      - name: Verify IPA
+        run: |
+          ls -lah artifacts/
+          IPA=$(find artifacts -maxdepth 1 -type f \
+            -name 'org.angelauramc.amethyst-*-ios.ipa' \
+            -print -quit)
+          if [ -z "$IPA" ]; then
+            echo "ERROR: IPA was not created."
+            exit 1
+          fi
+          echo "Found IPA: $IPA"
+
+      - name: Upload iOS IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Better-Launcher-iOS-IPA
+          path: artifacts/org.angelauramc.amethyst-*-ios.ipa
+          if-no-files-found: error
+          retention-days: 7
