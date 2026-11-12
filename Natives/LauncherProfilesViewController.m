@@ -6,7 +6,6 @@
 #import "LauncherPrefManageJREViewController.h"
 #import "LauncherProfileEditorViewController.h"
 #import "LauncherProfilesViewController.h"
-//#import "NSFileManager+NRFileManager.h"
 #import "PLProfiles.h"
 
 #pragma clang diagnostic push
@@ -62,11 +61,11 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
             }];
         }],
 
-#if 0 // TODO
+#if 0
         [UIAction actionWithTitle:@"OptiFine"
                             image:nil
                        identifier:@"optifine"
-                          handler:createHandler],
+                          handler:nil],
 #endif
 
         [UIAction actionWithTitle:@"Fabric/Quilt"
