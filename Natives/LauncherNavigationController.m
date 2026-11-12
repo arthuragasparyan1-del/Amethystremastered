@@ -1,3 +1,4 @@
+
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "authenticator/BaseAuthenticator.h"
 #import "AFNetworking.h"
@@ -48,9 +49,15 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     if ([self respondsToSelector:@selector(setNeedsUpdateOfScreenEdgesDeferringSystemGestures)]) {
         [self setNeedsUpdateOfScreenEdgesDeferringSystemGestures];
     }
+
     UIToolbar *targetToolbar = self.toolbar;
-    BOOL hasLiquidGlass = _UISolariumEnabled && _UISolariumEnabled();
-    
+
+    // Avoid referencing the private _UISolariumEnabled symbol.
+    BOOL hasLiquidGlass = NO;
+    if (@available(iOS 26.0, *)) {
+        hasLiquidGlass = YES;
+    }
+
     if(hasLiquidGlass) {
         self.versionTextField = [[PickTextField alloc] initWithFrame:CGRectMake(0, 0, MIN(self.view.frame.size.width,self.view.frame.size.height)*0.8 - 40, 36)];
         self.progressViewMain = [[UIProgressView alloc] initWithFrame:CGRectMake(20, -5, self.versionTextField.frame.size.width-40, 0)];
@@ -58,6 +65,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         self.versionTextField = [[PickTextField alloc] initWithFrame:CGRectMake(4, 4, self.toolbar.frame.size.width * 0.8 - 8, self.toolbar.frame.size.height - 8)];
         self.progressViewMain = [[UIProgressView alloc] initWithFrame:CGRectMake(0, 0, targetToolbar.frame.size.width, 0)];
     }
+
     [self.versionTextField addTarget:self.versionTextField action:@selector(resignFirstResponder) forControlEvents:UIControlEventEditingDidEndOnExit];
     self.versionTextField.autoresizingMask = AUTORESIZE_MASKS;
     self.versionTextField.placeholder = @"Specify version...";
@@ -110,7 +118,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         [targetToolbar addSubview:self.versionTextField];
         [targetToolbar addSubview:self.buttonInstall];
     }
-    
+
     self.progressViewMain.autoresizingMask = AUTORESIZE_MASKS;
     self.progressViewMain.hidden = YES;
     self.progressText = [[UILabel alloc] initWithFrame:self.versionTextField.frame];
@@ -119,7 +127,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.progressText.font = [self.progressText.font fontWithSize:16];
     self.progressText.textAlignment = NSTextAlignmentCenter;
     self.progressText.userInteractionEnabled = NO;
-    
+
     if(hasLiquidGlass) {
         [textFieldContainer addSubview:self.progressText];
     } else {
@@ -128,12 +136,11 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
     [self fetchRemoteVersionList];
     [NSNotificationCenter.defaultCenter addObserver:self
-        selector:@selector(receiveNotification:) 
+        selector:@selector(receiveNotification:)
         name:@"InstallModpack"
         object:nil];
 
     if ([BaseAuthenticator.current isKindOfClass:MicrosoftAuthenticator.class]) {
-        // Perform token refreshment on startup
         [self setInteractionEnabled:NO forDownloading:NO];
         id callback = ^(id status, BOOL success) {
             status = [status description];
@@ -201,17 +208,12 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     }];
 }
 
-// Invoked by: startup, instance change event
 - (void)reloadProfileList {
-    // Reload local version list
     [self fetchLocalVersionList];
-    // Reload launcher_profiles.json
     [PLProfiles updateCurrent];
     [self.versionPickerView reloadAllComponents];
-    // Reload selected profile info
     self.profileSelectedAt = [PLProfiles.current.profiles.allKeys indexOfObject:PLProfiles.current.selectedProfileName];
     if (self.profileSelectedAt == -1) {
-        // This instance has no profiles?
         return;
     }
     [self.versionPickerView selectRow:self.profileSelectedAt inComponent:0 animated:NO];
@@ -219,6 +221,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 }
 
 #pragma mark - Options
+
 - (void)enterCustomControls {
     CustomControlsViewController *vc = [[CustomControlsViewController alloc] init];
     vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
@@ -285,7 +288,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     }
 
     if (BaseAuthenticator.current == nil) {
-        // Present the account selector if none selected
         UIViewController *view = [(UINavigationController *)self.splitViewController.viewControllers[0]
         viewControllers][0];
         [view performSelector:@selector(selectAccount:) withObject:sender];
@@ -332,11 +334,9 @@ static void *ProgressObserverContext = &ProgressObserverContext;
             self.progressVC = [[UINavigationController alloc] initWithRootViewController:vc];
             self.progressVC.modalPresentationStyle = UIModalPresentationPopover;
         } else if (self.progressVC.popoverPresentationController._isDismissing) {
-            // FIXME: stock bug? it crashes when users dismisses and presents this vc too fast
-            // "UIPopoverPresentationController () should have a non-nil sourceView or barButtonItem set before the presentation occurs."
             return;
         }
-        
+
         if (usesBarButtonItem) {
             self.progressVC.popoverPresentationController.barButtonItem = sender;
         } else {
@@ -357,12 +357,11 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         return;
     }
 
-    // Calculate download speed and ETA
     static CGFloat lastMsTime;
     static NSUInteger lastSecTime, lastCompletedUnitCount;
     NSProgress *progress = self.task.textProgress;
     struct timeval tv;
-    gettimeofday(&tv, NULL); 
+    gettimeofday(&tv, NULL);
     NSInteger completedUnitCount = self.task.progress.totalUnitCount * self.task.progress.fractionCompleted;
     progress.completedUnitCount = completedUnitCount;
     if (lastSecTime < tv.tv_sec) {
@@ -434,7 +433,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     } else if (hasTrollStoreJIT) {
         NSURL *jitURL = [NSURL URLWithString:[NSString stringWithFormat:@"apple-magnifier://enable-jit?bundle-id=%@", NSBundle.mainBundle.bundleIdentifier]];
         [UIApplication.sharedApplication openURL:jitURL options:@{} completionHandler:nil];
-        // Do not return, wait for TrollStore to enable JIT and jump back
     } else if (getPrefBool(@"debug.debug_skip_wait_jit")) {
         NSLog(@"Debug option skipped waiting for JIT. Java might not work.");
         handler();
@@ -447,7 +445,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         }
         [UIApplication.sharedApplication openURL:[NSURL URLWithString:[NSString stringWithFormat:@"stikjit://enable-jit?bundle-id=%@&pid=%d%@", NSBundle.mainBundle.bundleIdentifier, getpid(), scriptDataString]] options:@{} completionHandler:nil];
     } else {
-        // Assuming 16.7-17.3.1. SideStore still lacks this URL scheme at the time of writing, so it only jumps to SideStore.
         [UIApplication.sharedApplication openURL:[NSURL URLWithString:[NSString stringWithFormat:@"sidestore://sidejit-enable?pid=%d", getpid()]] options:@{} completionHandler:nil];
     }
 
@@ -456,17 +453,11 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     UIAlertController* alert = [UIAlertController alertControllerWithTitle:localize(@"launcher.wait_jit.title", nil)
         message:hasTrollStoreJIT ? localize(@"launcher.wait_jit_trollstore.message", nil) : localize(@"launcher.wait_jit.message", nil)
         preferredStyle:UIAlertControllerStyleAlert];
-/* TODO:
-    UIAlertAction *cancel = [UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:^{
-        
-    }];
-    [alert addAction:cancel];
-*/
+
     [self presentViewController:alert animated:YES completion:nil];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         while (!isJITEnabled(false)) {
-            // Perform check for every 200ms
             usleep(1000*200);
         }
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -476,14 +467,15 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 }
 
 #pragma mark - UIPopoverPresentationControllerDelegate
+
 - (UIModalPresentationStyle)adaptivePresentationStyleForPresentationController:(UIPresentationController *)controller traitCollection:(UITraitCollection *)traitCollection {
     return UIModalPresentationNone;
 }
 
 #pragma mark - UIPickerView stuff
+
 - (void)pickerView:(PLPickerView *)pickerView didSelectRow:(NSInteger)row inComponent:(NSInteger)component {
     self.profileSelectedAt = row;
-    //((UIImageView *)self.versionTextField.leftView).image = [pickerView imageAtRow:row column:component];
     ((UIImageView *)self.versionTextField.leftView).image = [pickerView imageAtRow:row column:component];
     self.versionTextField.text = [self pickerView:pickerView titleForRow:row forComponent:component];
     PLProfiles.current.selectedProfileName = self.versionTextField.text;
@@ -493,15 +485,15 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     return 1;
 }
 
-- (NSInteger)pickerView:(UIPickerView *)pickerView numberOfRowsInComponent:(NSInteger)component {
+- (NSInteger)pickerView:(PLPickerView *)pickerView numberOfRowsInComponent:(NSInteger)component {
     return PLProfiles.current.profiles.count;
 }
 
-- (NSString *)pickerView:(UIPickerView *)pickerView titleForRow:(NSInteger)row forComponent:(NSInteger)component {
+- (NSString *)pickerView:(PLPickerView *)pickerView titleForRow:(NSInteger)row forComponent:(NSInteger)component {
     return PLProfiles.current.profiles.allValues[row][@"name"];
 }
 
-- (void)pickerView:(UIPickerView *)pickerView enumerateImageView:(UIImageView *)imageView forRow:(NSInteger)row forComponent:(NSInteger)component {
+- (void)pickerView:(PLPickerView *)pickerView enumerateImageView:(UIImageView *)imageView forRow:(NSInteger)row forComponent:(NSInteger)component {
     UIImage *fallbackImage = [[UIImage imageNamed:@"DefaultProfile"] _imageWithSize:CGSizeMake(40, 40)];
     NSString *urlString = PLProfiles.current.profiles.allValues[row][@"icon"];
     [imageView setImageWithURL:[NSURL URLWithString:urlString] placeholderImage:fallbackImage];
@@ -525,7 +517,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         if (!self.viewControllers.firstObject.toolbarItems) {
             self.viewControllers.firstObject.toolbarItems = self.globalToolbarItems;
         }
-        // resize textFieldContainer to fit, need dispatch queue or it freezes for some reason...
         dispatch_async(dispatch_get_main_queue(), ^{
             self.versionTextField.superview.frame = CGRectMake(0, 0, MIN(self.view.frame.size.width,self.view.frame.size.height)*0.8 - 40, 36);
         });
